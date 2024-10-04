@@ -10,6 +10,7 @@ yagmail = "*"
 mangum = "*"
 shortuuid = "*"
 uvicorn = "*"
+pydantic = "*"
 
 [dev-packages]
 

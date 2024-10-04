@@ -4,12 +4,10 @@ from fastapi.params import Body
 import pymysql
 from pydantic import BaseModel
 from typing import Optional, Union
-
-from datetime import datetime
+from datetime import datetime, date
 import mangum
 import yagmail
 import shortuuid
-
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
@@ -164,7 +162,6 @@ async def delete_admin_info(email_id: str):
         raise HTTPException(status_code=500, detail=str(err))
     finally:
         connection.close()
-
 
 class InviteInfo(BaseModel):
     email: str
@@ -549,22 +546,22 @@ async def delete_sign_up(id: str):
 
 # Pydantic model for Ticket
 class TicketInfo(BaseModel):
-    company_id: str
+    company_id: Optional[str] = None
     ticket_type: Optional[str] = None
     name: Optional[str] = None
     phone_number: Optional[str] = None
     images: Optional[str] = None
-    status: Optional[int] = 1
-    complain_raised_date: Optional[str] = None
+    status: Optional[int] = None
+    complain_raised_date: Optional[date] = None
     description: Optional[str] = None
     available_slots: Optional[str] = None
     rejected_reason: Optional[str] = None
-    rejected_date: Optional[str] = None
+    rejected_date: Optional[date] = None
     street: Optional[str] = None
     city: Optional[str] = None
-    zip: Optional[int] = None
     state: Optional[str] = None
-
+    zip: Optional[int] = None
+    
 # Create a new Ticket
 @app.post("/ticket/create")
 async def create_ticket(ticket: TicketInfo = Body(...)):
@@ -577,6 +574,7 @@ async def create_ticket(ticket: TicketInfo = Body(...)):
             sql = """
                 CALL spCreateTicketInfo(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
             """
+
             cursor.execute(sql, (
                 ticket.company_id, 
                 ticket.ticket_type, 
@@ -758,7 +756,45 @@ async def create_employee(employee: Employee = Body(...)):
             ))
             connection.commit()
 
-            return {"message": "Employee created successfully"}
+            company_sql = "CALL spGetCompanyById(%s);"
+            cursor.execute(company_sql, (employee.company_id,))
+            result = cursor.fetchone()
+
+            url = f"http://127.0.0.1:5501/signUp.html?invite_id_e={employee.company_id}"
+
+            sender = 'pitchumaniece@gmail.com'
+            app_password = 'oppv abhd hfwh kavm'
+            subject = f"Welcome to {result["company_name"]} – Activate Your Account and Get Started!"
+
+
+
+            html_content = f"""
+                <html>
+                <body style="font-family: Arial, sans-serif; line-height: 1.5; color: #333;">
+                    <div style="max-width: 500px; margin: auto; padding: 15px; border: 1px solid #e0e0e0; border-radius: 8px;">
+                        <p>Dear {employee.first_name+" "+employee.last_name},</p>
+                        <p>Welcome to <strong>{result["company_name"]}</strong>! We are excited to have you as part of our team. Your registration process has been successfully completed, and you can now access your account using the button below.</p>
+                        <p style="text-align: center;">
+                            <a href="{url}" style="display: inline-block; padding: 10px 20px; margin: 10px 0; background-color: #4CAF50; color: white; text-decoration: none; border-radius: 5px;">Activate Your Account</a>
+                        </p>
+                        <p>If you have any questions or need further assistance during your onboarding process, please don't hesitate to reach out to your HR representative. We're here to ensure you have a smooth experience getting started at <strong>{result["company_name"]}</strong>.</p>
+                        
+                        <p>Thank you for being part of our journey, and we look forward to working together to achieve great things.</p>
+
+                        <p>Best regards,<br>HR Support Team<br><strong>{result["company_name"]}</strong></p>
+                    </div>
+                </body>
+                </html>
+                """
+            
+            # Initialize Yagmail with the sender's Gmail credentials
+            yag = yagmail.SMTP(user=sender, password=app_password)
+
+            # Sending the email
+            yag.send(to=employee.email, subject=subject, contents=html_content)
+
+
+            return {"message": "Employee created successfully and mail sent done!!!!!"}
     except pymysql.MySQLError as err:
         print(f"Error calling stored procedure: {err}")
         raise HTTPException(status_code=500, detail={"message": "Employee creation failed"})
@@ -886,7 +922,7 @@ async def company_register_call(company_info: CompanyInfo = Body(...)):
                 company_info.state
             ))
             connection.commit()
-            url = f"http://127.0.0.1:5501/signUp.html?invite_id={company_id}"
+            url = f"http://127.0.0.1:5501/signUp.html?invite_id_c={company_id}"
 
             current_datetime = datetime.now()
 
@@ -976,7 +1012,6 @@ class TicketStatus(BaseModel):
     photos: Optional[str] = None
     service_status: Optional[str] = None 
     rejected_reason: Optional[str] = None
-
 
 @app.post("/ticket_status/create")
 async def create_ticket_status(ticket_status: TicketStatus = Body(...)):
@@ -1098,6 +1133,95 @@ async def delete_ticket_status(ticket_token: str):
     except pymysql.MySQLError as err:
         print(f"Error deleting ticket status: {err}")
         raise HTTPException(status_code=500, detail="Delete ticket status failed (DB Error)")
+    finally:
+        if connection:
+            connection.close()
+
+@app.get("/tickets/rejected/{company_id}")
+async def get_rejected_tickets(company_id: str):
+    connection = connect_to_database()
+    if not connection:
+        raise HTTPException(status_code=500, detail="Failed to connect to the database")
+
+    try:
+        with connection.cursor() as cursor:
+            sql = "CALL spGetAllRejectedTickets(%s);"
+            cursor.execute(sql, (company_id,))
+            result = cursor.fetchall()
+            if result:
+                return result
+            else:
+                raise HTTPException(status_code=404, detail="No rejected tickets found")
+    except pymysql.MySQLError as err:
+        print(f"Error fetching rejected tickets: {err}")
+        raise HTTPException(status_code=500, detail="Failed to fetch rejected tickets (DB Error)")
+    finally:
+        if connection:
+            connection.close()
+
+@app.get("/tickets/unassigned/{company_id}")
+async def get_unassigned_tickets(company_id: str):
+    connection = connect_to_database()
+    if not connection:
+        raise HTTPException(status_code=500, detail="Failed to connect to the database")
+
+    try:
+        with connection.cursor() as cursor:
+            sql = "CALL spGetAllUnassignedTickets(%s);"
+            cursor.execute(sql, (company_id,))
+            result = cursor.fetchall()
+            if result:
+                return result
+            else:
+                raise HTTPException(status_code=404, detail="No unassigned tickets found")
+    except pymysql.MySQLError as err:
+        print(f"Error fetching unassigned tickets: {err}")
+        raise HTTPException(status_code=500, detail="Failed to fetch unassigned tickets (DB Error)")
+    finally:
+        if connection:
+            connection.close()
+
+@app.get("/tickets/inprogress/{company_id}")
+async def get_inprogress_tickets(company_id: str):
+    connection = connect_to_database()
+    if not connection:
+        raise HTTPException(status_code=500, detail="Failed to connect to the database")
+
+    try:
+        with connection.cursor() as cursor:
+            sql = "CALL spGetAllInProgressTickets(%s);"
+            cursor.execute(sql, (company_id,))
+            result = cursor.fetchall()
+            if result:
+                return result
+            else:
+                raise HTTPException(status_code=404, detail="No in-progress tickets found")
+    except pymysql.MySQLError as err:
+        print(f"Error fetching in-progress tickets: {err}")
+        raise HTTPException(status_code=500, detail="Failed to fetch in-progress tickets (DB Error)")
+    finally:
+        if connection:
+            connection.close()
+
+
+@app.get("/tickets/completed/{company_id}")
+async def get_completed_tickets(company_id: str):
+    connection = connect_to_database()
+    if not connection:
+        raise HTTPException(status_code=500, detail="Failed to connect to the database")
+
+    try:
+        with connection.cursor() as cursor:
+            sql = "CALL spGetAllCompletedTickets(%s);"
+            cursor.execute(sql, (company_id,))
+            result = cursor.fetchall()
+            if result:
+                return result
+            else:
+                raise HTTPException(status_code=404, detail="No completed tickets found")
+    except pymysql.MySQLError as err:
+        print(f"Error fetching completed tickets: {err}")
+        raise HTTPException(status_code=500, detail="Failed to fetch completed tickets (DB Error)")
     finally:
         if connection:
             connection.close()
