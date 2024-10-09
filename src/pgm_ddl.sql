@@ -624,4 +624,34 @@ END //
 
 DELIMITER ;
 
+-- Stored Procedure to Get All Employees & Available Employees Count
+DELIMITER //
+
+CREATE PROCEDURE spGetEmployeeCount(
+IN p_company_id VARCHAR(255))
+BEGIN
+	SELECT 
+		COUNT(CASE WHEN is_active = TRUE THEN 1 END) AS total_employee,
+		COUNT(CASE WHEN available = 1 and is_active = TRUE THEN 1 END) AS available_employee
+		FROM employee 
+		WHERE company_id = p_company_id;
+END //
+
+DELIMITER ;
+
+-- Stored Procedure to Get Ticket Counts
+DELIMITER //
+
+CREATE PROCEDURE spGetTicketCount()
+BEGIN
+    SELECT 
+		COUNT(id) AS total_tickets,
+		COUNT(CASE WHEN service_status = 'pending' THEN 1 END) AS pending_tickets,
+        COUNT(CASE WHEN service_status = 'inprogress' THEN 1 END) AS inprogress_tickets,
+        COUNT(CASE WHEN service_status = 'completed' THEN 1 END) AS completed_tickets
+		FROM ticket_status;
+END //
+
+DELIMITER ;
+
 
