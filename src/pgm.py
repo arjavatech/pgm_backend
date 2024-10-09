@@ -1226,6 +1226,49 @@ async def get_completed_tickets(company_id: str):
         if connection:
             connection.close()
 
+            # --------------Resend Mail---------------------------
+#resend mail trigger
+class ResendMail(BaseModel):
+    company_id: str = None
+    company_name: str = None
+    phone_number: str = None
+    first_name: str = None
+    email: str = None
+@app.post("/company_register/resend-mail")
+async def company_resend_mail_call(resend_info: ResendMail = Body(...)):      
+    url = f"http://127.0.0.1:5501/signUp.html?invite_id_c={resend_info.company_id}"
+
+    company_name = "PG Mechanical"
+
+    sender = 'pitchumaniece@gmail.com'
+    app_password = 'oppv abhd hfwh kavm'
+    subject = "Complete Your Account Creation for The PG Mechanical Scheduler App"
+
+    # Email content in HTML
+    html_content = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; line-height: 1.5; color: #333;">
+        <div style="max-width: 500px; margin: auto; padding: 15px; border: 1px solid #e0e0e0; border-radius: 8px;">
+            <p>Dear {resend_info.first_name},</p>
+            <p>We noticed you started the account creation process but haven’t finished setting up your account yet. Please click the button to create a account,</p>
+            <p style="text-align: center;">
+                <a href="{url}" style="display: inline-block; padding: 10px 20px; margin: 10px 0; background-color: #4CAF50; color: white; text-decoration: none; border-radius: 5px;">Create Your Account</a>
+            </p>
+            <p>A dedicated representative will be in touch with you soon to provide further assistance and ensure all your queries are answered. In the meantime, if you have any additional questions or require further clarification, please do not hesitate to reach out to us. We are here to help and ensure you receive the best possible service.</p>
+            
+            <p>Thank you for choosing <strong>{company_name}</strong>. We look forward to working with you.</p>
+
+            <p>Best regards,<br>PG Support Team<br><strong>{company_name}</strong></p>
+        </div>
+    </body>
+    </html>
+    """
+    # Initialize Yagmail with the sender's Gmail credentials
+    yag = yagmail.SMTP(user=sender, password=app_password)
+
+    # Sending the email
+    yag.send(to=resend_info.email, subject=subject, contents=html_content)
+
             # ---------------Ticket & Employee count------------------
 #count of employee
 @app.get("/employee_count/{id}")
