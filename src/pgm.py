@@ -213,6 +213,29 @@ async def get_invite_info(email: str):
         if connection:
             connection.close()
 
+@app.post("/invite_status/get")
+async def get_invite_info(request: dict = Body(...)):
+    connection = connect_to_database()
+    if not connection:
+        raise HTTPException(status_code=500, detail="Failed to connect to database")
+
+    try:
+        with connection.cursor() as cursor:
+            url = request.get("url")
+            sql = "CALL spGetInviteStatus(%s);"
+            cursor.execute(sql, (url,))
+            result = cursor.fetchone()
+            if result:
+                return result["status"]
+            else:
+                raise HTTPException(status_code=404, detail=f"Invite Info with url_id {url} not found")
+    except pymysql.MySQLError as err:
+        print(f"Error fetching invite_info: {err}")
+        raise HTTPException(status_code=500, detail={"error": "Invite Info get call failed (DB Error)"})
+    finally:
+        if connection:
+            connection.close()
+
 @app.get("/invite_info/getall")
 async def get_all_invite_info():
     connection = connect_to_database()
@@ -392,8 +415,8 @@ async def update_company(company_id: str, company_info: CompanyInfo = Body(...))
         if connection:
             connection.close()
 
-@app.put("/company/delete/{company_id}")
-async def delete_company(company_id: str):
+@app.put("/company/delete/{company_id}/{email}")
+async def delete_company(company_id: str, email: str):
     connection = connect_to_database()
     if not connection:
         raise HTTPException(status_code=500, detail="Failed to connect to database")
@@ -402,6 +425,10 @@ async def delete_company(company_id: str):
         with connection.cursor() as cursor:
             sql = "CALL spDeleteCompany(%s);"
             cursor.execute(sql, (company_id,))
+            connection.commit()
+
+            invite_sql = "CALL spDeleteInviteInfo(%s);"
+            cursor.execute(invite_sql, (email,))
             connection.commit()
 
             return {"message": f"Company with ID {company_id} deleted (soft delete) successfully"}
@@ -440,6 +467,12 @@ async def create_sign_up(sign_up: SignUp = Body(...)):
                 sign_up.approved_by, 
                 sign_up.signup_url, 
                 sign_up.is_employee
+            ))
+            connection.commit()
+
+            invite_sql = "CALL spUpdateInviteStatus(%s,);"
+            cursor.execute(invite_sql, (
+                sign_up.signup_url
             ))
             connection.commit()
 
@@ -760,7 +793,7 @@ async def create_employee(employee: Employee = Body(...)):
             cursor.execute(company_sql, (employee.company_id,))
             result = cursor.fetchone()
 
-            url = f"http://127.0.0.1:5501/signUp.html?invite_id_e={employee.company_id}"
+            url = f"https://arjavatech.github.io/pgm_scheduler/signUp.html?invite_id_e={employee.company_id}"
 
             sender = 'pitchumaniece@gmail.com'
             app_password = 'oppv abhd hfwh kavm'
@@ -906,62 +939,78 @@ async def company_register_call(company_info: CompanyInfo = Body(...)):
         with connection.cursor() as cursor:
 
             company_id = shortuuid.uuid()
-
-            sql = "CALL spCreateCompany(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);"
-            cursor.execute(sql, (
-                company_id, 
-                company_info.company_name, 
-                company_info.logo, 
-                company_info.phone_number, 
-                company_info.email, 
-                company_info.first_name, 
-                company_info.last_name, 
-                company_info.street, 
-                company_info.city, 
-                company_info.zip, 
-                company_info.state
-            ))
-            connection.commit()
-            url = f"http://127.0.0.1:5501/signUp.html?invite_id_c={company_id}"
+            url = f"https://arjavatech.github.io/pgm_scheduler/signUp.html?invite_id_c={company_id}"
 
             current_datetime = datetime.now()
 
-            invite_sql = "CALL spCreateInviteInfo(%s, %s, %s, %s);"
-            cursor.execute(invite_sql, (company_info.email, url, current_datetime , "Pending"))
-            connection.commit()
+            invite_email_check = "CALL spGetInviteInfo(%s);"
+            cursor.execute(invite_email_check, (company_info.email,))
+            invite_result = cursor.fetchone()
 
-            company_name = "PG Mechanical"
+            if invite_result:
+                return {"error": "User Email Already Registered with another company"}
+            else:
+                invite_sql = "CALL spCreateInviteInfo(%s, %s, %s, %s);"
+                cursor.execute(invite_sql, (company_info.email, url, current_datetime , "Pending"))
+                connection.commit()
 
-            sender = 'pitchumaniece@gmail.com'
-            app_password = 'oppv abhd hfwh kavm'
-            subject = "Invitation to Create an Account for The PG Mechanical Scheduler App"
+            company_sql = "CALL spGetUser(%s)"
+            cursor.execute(company_sql, (company_info.email, ))
+            result = cursor.fetchone()
 
-            # Email content in HTML
-            html_content = f"""
-            <html>
-            <body style="font-family: Arial, sans-serif; line-height: 1.5; color: #333;">
-                <div style="max-width: 500px; margin: auto; padding: 15px; border: 1px solid #e0e0e0; border-radius: 8px;">
-                    <p>Dear {company_info.first_name+" "+company_info.last_name},</p>
-                    <p>We hope this message finds you well. We wanted to confirm that we have received your recent request and appreciate the opportunity to assist you. Rest assured, our team is now reviewing the information you provided, and we are committed to addressing your needs as promptly as possible. Click the button to continue using our app,</p>
-                    <p style="text-align: center;">
-                        <a href="{url}" style="display: inline-block; padding: 10px 20px; margin: 10px 0; background-color: #4CAF50; color: white; text-decoration: none; border-radius: 5px;">Create Your Account</a>
-                    </p>
-                    <p>A dedicated representative will be in touch with you soon to provide further assistance and ensure all your queries are answered. In the meantime, if you have any additional questions or require further clarification, please do not hesitate to reach out to us. We are here to help and ensure you receive the best possible service.</p>
-                    
-                    <p>Thank you for choosing <strong>{company_name}</strong>. We look forward to working with you.</p>
+            if result:
+                return {"error": "User Already Registered"}
+            else:
+                sql = "CALL spCreateCompany(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);"
+                cursor.execute(sql, (
+                    company_id, 
+                    company_info.company_name, 
+                    company_info.logo, 
+                    company_info.phone_number, 
+                    company_info.email, 
+                    company_info.first_name, 
+                    company_info.last_name, 
+                    company_info.street, 
+                    company_info.city, 
+                    company_info.zip, 
+                    company_info.state
+                ))
+                connection.commit()
 
-                    <p>Best regards,<br>PG Support Team<br><strong>{company_name}</strong></p>
-                </div>
-            </body>
-            </html>
-            """
-            # Initialize Yagmail with the sender's Gmail credentials
-            yag = yagmail.SMTP(user=sender, password=app_password)
+                company_name = "PG Mechanical"
 
-            # Sending the email
-            yag.send(to=company_info.email, subject=subject, contents=html_content)
+                sender = 'pitchumaniece@gmail.com'
+                app_password = 'oppv abhd hfwh kavm'
+                subject = "Invitation to Create an Account for The PG Mechanical Scheduler App"
 
-            return {"message": "Email sent successfully"}
+                # Email content in HTML
+                html_content = f"""
+                <html>
+                <body style="font-family: Arial, sans-serif; line-height: 1.5; color: #333;">
+                    <div style="max-width: 500px; margin: auto; padding: 15px; border: 1px solid #e0e0e0; border-radius: 8px;">
+                        <p>Dear {company_info.first_name+" "+company_info.last_name},</p>
+                        <p>We hope this message finds you well. We wanted to confirm that we have received your recent request and appreciate the opportunity to assist you. Rest assured, our team is now reviewing the information you provided, and we are committed to addressing your needs as promptly as possible. Click the button to continue using our app,</p>
+                        <p style="text-align: center;">
+                            <a href="{url}" style="display: inline-block; padding: 10px 20px; margin: 10px 0; background-color: #4CAF50; color: white; text-decoration: none; border-radius: 5px;">Create Your Account</a>
+                        </p>
+                        <p>A dedicated representative will be in touch with you soon to provide further assistance and ensure all your queries are answered. In the meantime, if you have any additional questions or require further clarification, please do not hesitate to reach out to us. We are here to help and ensure you receive the best possible service.</p>
+                        
+                        <p>Thank you for choosing <strong>{company_name}</strong>. We look forward to working with you.</p>
+
+                        <p>Best regards,<br>PG Support Team<br><strong>{company_name}</strong></p>
+                    </div>
+                </body>
+                </html>
+                """
+                # Initialize Yagmail with the sender's Gmail credentials
+                yag = yagmail.SMTP(user=sender, password=app_password)
+
+                
+
+                # Sending the email
+                yag.send(to=company_info.email, subject=subject, contents=html_content)
+
+                return {"message": "Email sent successfully"}
     except pymysql.MySQLError as err:
         print(f"Error calling stored procedure: {err}")
         raise HTTPException(status_code=500, detail={"message": "Email sent failed"})
@@ -1203,7 +1252,6 @@ async def get_inprogress_tickets(company_id: str):
         if connection:
             connection.close()
 
-
 @app.get("/tickets/completed/{company_id}")
 async def get_completed_tickets(company_id: str):
     connection = connect_to_database()
@@ -1225,5 +1273,58 @@ async def get_completed_tickets(company_id: str):
     finally:
         if connection:
             connection.close()
+
+class CompanyInfoMailModel(BaseModel):
+    company_id: Optional[str] = None
+    company_name: Optional[str] = None
+    phone_number: Optional[str] = None
+    email: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+
+@app.post("/company_mail/resend")
+async def company_register_call(company_info: CompanyInfoMailModel = Body(...)):
+
+
+    try:
+
+            
+            url = f"https://arjavatech.github.io/pgm_scheduler/signUp.html?invite_id_c={company_info.company_id}"
+
+            company_name = "PG Mechanical"
+
+            sender = 'pitchumaniece@gmail.com'
+            app_password = 'oppv abhd hfwh kavm'
+            subject = "Invitation to Create an Account for The PG Mechanical Scheduler App"
+
+            # Email content in HTML
+            html_content = f"""
+            <html>
+            <body style="font-family: Arial, sans-serif; line-height: 1.5; color: #333;">
+                <div style="max-width: 500px; margin: auto; padding: 15px; border: 1px solid #e0e0e0; border-radius: 8px;">
+                    <p>Dear {company_info.first_name+" "+company_info.last_name},</p>
+                    <p>We hope this message finds you well. We wanted to confirm that we have received your recent request and appreciate the opportunity to assist you. Rest assured, our team is now reviewing the information you provided, and we are committed to addressing your needs as promptly as possible. Click the button to continue using our app,</p>
+                    <p style="text-align: center;">
+                        <a href="{url}" style="display: inline-block; padding: 10px 20px; margin: 10px 0; background-color: #4CAF50; color: white; text-decoration: none; border-radius: 5px;">Create Your Account</a>
+                    </p>
+                    <p>A dedicated representative will be in touch with you soon to provide further assistance and ensure all your queries are answered. In the meantime, if you have any additional questions or require further clarification, please do not hesitate to reach out to us. We are here to help and ensure you receive the best possible service.</p>
+                    
+                    <p>Thank you for choosing <strong>{company_name}</strong>. We look forward to working with you.</p>
+
+                    <p>Best regards,<br>PG Support Team<br><strong>{company_name}</strong></p>
+                </div>
+            </body>
+            </html>
+            """
+            # Initialize Yagmail with the sender's Gmail credentials
+            yag = yagmail.SMTP(user=sender, password=app_password)
+
+            # Sending the email
+            yag.send(to=company_info.email, subject=subject, contents=html_content)
+
+            return {"message": "Email sent successfully"}
+    except pymysql.MySQLError as err:
+        raise HTTPException(status_code=500, detail={"message": "Email sent failed"})
+
 
 handler=mangum.Mangum(app)
