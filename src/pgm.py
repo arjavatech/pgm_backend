@@ -1329,8 +1329,6 @@ async def company_register_call(company_info: CompanyInfoMailModel = Body(...)):
 
 
 # reset password Api
-
-
 # Pydantic model for changing password
 class ChangePasswordRequest(BaseModel):
     id: str
