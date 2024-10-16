@@ -16,19 +16,22 @@ app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_credentials = True, allow_methods=["*"], allow_headers=["*"]
 )
 
+
+
 def connect_to_database():
     try:
         connection = pymysql.connect(
-            host="pgm.cxms2oikutcu.us-west-2.rds.amazonaws.com",
+            host="localhost",
             port=3306,
-            user="admin",
-            password="AWSpass01#",
-            database="pgm_test",
-            cursorclass=pymysql.cursors.DictCursor 
+            user="root",
+            password="Rolex_Surya07",
+            database="pqm_final",
+            cursorclass=pymysql.cursors.DictCursor
         )
         return connection
     except pymysql.MySQLError as err:
         return None
+
 
 @app.get("/test")
 def get_test():
@@ -517,7 +520,7 @@ async def get_all_sign_ups():
 
     try:
         with connection.cursor() as cursor:
-            sql = "CALL GetAllSignUp();"
+            sql = "CALL spGetAllSignUp();"
             cursor.execute(sql)
             result = cursor.fetchall()
             return result
@@ -797,10 +800,7 @@ async def create_employee(employee: Employee = Body(...)):
 
             sender = 'pitchumaniece@gmail.com'
             app_password = 'oppv abhd hfwh kavm'
-            subject = f"Welcome to {result["company_name"]} – Activate Your Account and Get Started!"
-
-
-
+            subject = f"Welcome to {result['company_name']} – Activate Your Account!"
             html_content = f"""
                 <html>
                 <body style="font-family: Arial, sans-serif; line-height: 1.5; color: #333;">
@@ -1326,5 +1326,34 @@ async def company_register_call(company_info: CompanyInfoMailModel = Body(...)):
     except pymysql.MySQLError as err:
         raise HTTPException(status_code=500, detail={"message": "Email sent failed"})
 
+
+
+# reset password Api
+
+
+# Pydantic model for changing password
+class ChangePasswordRequest(BaseModel):
+    id: str
+    new_password: str
+
+# API to change password
+@app.put("/change_password")
+async def change_password(request: ChangePasswordRequest):
+    connection = connect_to_database()
+    if not connection:
+        raise HTTPException(status_code=500, detail="Failed to connect to database")
+
+    try:
+        with connection.cursor() as cursor:
+            # Call the stored procedure
+            sql = "CALL spChangePassword(%s, %s)"
+            cursor.execute(sql, (request.id, request.new_password))
+            connection.commit()
+
+            return {"message": "Password changed successfully"}
+    except pymysql.MySQLError as err:
+        raise HTTPException(status_code=500, detail=f"Error calling stored procedure: {err}")
+    finally:
+        connection.close()
 
 handler=mangum.Mangum(app)

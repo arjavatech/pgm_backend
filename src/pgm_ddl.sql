@@ -1,7 +1,3 @@
-CREATE DATABASE pgm_test;
-
-USE pgm_test;
-
 CREATE TABLE `admin_info` (
   `email_id` varchar(255) NOT NULL,
   `password` varchar(255) DEFAULT NULL,
@@ -83,8 +79,6 @@ END //
 
 DELIMITER ;
 
-call pgm_test.spCreateAdminInfo('pitchumaniece@gmail.com', '', '', '');
-
 
 CREATE TABLE `invite_info` (
   `email` varchar(255) NOT NULL,
@@ -164,6 +158,7 @@ BEGIN
 END //
 
 DELIMITER ;
+
 
 CREATE TABLE company (
     company_id VARCHAR(255) NOT NULL PRIMARY KEY,
@@ -305,7 +300,7 @@ END //
 
 DELIMITER //
 
-CREATE PROCEDURE GetAllSignUp()
+CREATE PROCEDURE spGetAllSignUp()
 BEGIN
     SELECT * FROM sign_up WHERE is_active = TRUE;
 END //
@@ -625,3 +620,114 @@ END //
 DELIMITER ;
 
 
+
+CREATE TABLE ticket_status (
+    ticket_token VARCHAR(250) PRIMARY KEY,
+    company_id VARCHAR(250) NOT NULL,
+    employee_id VARCHAR(250) NOT NULL,
+    ticket_id INT NOT NULL,
+    work_started_time DATETIME DEFAULT NULL,
+    work_ended_time DATETIME DEFAULT NULL,
+    photos TEXT DEFAULT NULL,
+    service_status ENUM('rejected', 'pending', 'inprogress', 'completed', 'assigned') DEFAULT 'pending',
+    rejected_reason TEXT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    is_active BOOLEAN DEFAULT TRUE
+);
+
+DELIMITER $$
+
+CREATE PROCEDURE spCreateTicketStatus(
+    IN p_ticket_token VARCHAR(36),
+    IN p_company_id VARCHAR(36),
+    IN p_employee_id VARCHAR(36),
+    IN p_ticket_id INT,
+    IN p_work_started_time DATETIME,
+    IN p_work_ended_time DATETIME,
+    IN p_photos TEXT,
+    IN p_service_status VARCHAR(20),  -- Use VARCHAR here
+    IN p_rejected_reason TEXT,
+    IN p_last_modified_by VARCHAR(250)
+)
+BEGIN
+    INSERT INTO ticket_status (
+        ticket_token, company_id, employee_id, ticket_id, work_started_time, work_ended_time, 
+        photos, service_status, rejected_reason, last_modified_by
+    )
+    VALUES (
+        p_ticket_token, p_company_id, p_employee_id, p_ticket_id, p_work_started_time, 
+        p_work_ended_time, p_photos, p_service_status, p_rejected_reason, p_last_modified_by
+    );
+END$$
+
+CREATE PROCEDURE spGetTicketStatusById(
+    IN p_ticket_token VARCHAR(36)
+)
+BEGIN
+    SELECT * FROM ticket_status 
+    WHERE ticket_token = p_ticket_token AND is_active = TRUE;
+END$$
+
+CREATE PROCEDURE spGetAllActiveTicketStatuses()
+BEGIN
+    SELECT * FROM ticket_status 
+    WHERE is_active = TRUE;
+END$$
+
+CREATE PROCEDURE spUpdateTicketStatus(
+    IN p_ticket_token VARCHAR(36),
+    IN p_company_id VARCHAR(36),
+    IN p_employee_id VARCHAR(36),
+    IN p_ticket_id INT,
+    IN p_work_started_time DATETIME,
+    IN p_work_ended_time DATETIME,
+    IN p_photos TEXT,
+    IN p_service_status VARCHAR(20),
+    IN p_rejected_reason TEXT,
+    IN p_last_modified_by VARCHAR(255)
+)
+BEGIN
+    UPDATE ticket_status 
+    SET 
+        company_id = p_company_id,
+        employee_id = p_employee_id,
+        ticket_id = p_ticket_id,
+        work_started_time = p_work_started_time,
+        work_ended_time = p_work_ended_time,
+        photos = p_photos,
+        service_status = p_service_status,
+        rejected_reason = p_rejected_reason,
+        updated_at = CURRENT_TIMESTAMP,
+        last_modified_by = p_last_modified_by
+    WHERE ticket_token = p_ticket_token AND is_active = TRUE;
+END$$
+
+CREATE PROCEDURE spDeleteTicketStatus(
+    IN p_ticket_token VARCHAR(36)
+)
+BEGIN
+    UPDATE ticket_status 
+    SET is_active = FALSE, updated_at = CURRENT_TIMESTAMP
+    WHERE ticket_token = p_ticket_token;
+END$$
+
+DELIMITER ;
+
+
+-- Reset PAssword
+DELIMITER //
+
+CREATE PROCEDURE spCreateReset_password(
+    IN p_id VARCHAR(255),
+    IN p_new_password VARCHAR(100),
+    IN p_last_modified_by VARCHAR(250)
+)
+BEGIN
+    UPDATE sign_up
+    SET password = p_new_password,
+        last_modified_by = p_last_modified_by
+    WHERE id = p_id AND is_active = TRUE;
+END //
+
+DELIMITER ;
