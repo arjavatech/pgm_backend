@@ -470,10 +470,9 @@ async def create_sign_up(sign_up: SignUp = Body(...)):
             ))
             connection.commit()
 
-            invite_sql = "CALL spUpdateInviteStatus(%s,);"
-            cursor.execute(invite_sql, (
-                sign_up.signup_url
-            ))
+            invite_sql = "CALL spUpdateInviteStatus(%s);"
+            cursor.execute(invite_sql, sign_up.signup_url
+            )
             connection.commit()
 
             return {"message": "SignUp created successfully"}
