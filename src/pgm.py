@@ -1325,5 +1325,74 @@ async def company_register_call(company_info: CompanyInfoMailModel = Body(...)):
     except pymysql.MySQLError as err:
         raise HTTPException(status_code=500, detail={"message": "Email sent failed"})
 
+# ---------------Ticket & Employee count------------------
+#count of employee
+@app.get("/employee_count/{id}")
+async def get_ticket_count(id: str):
+    connection = connect_to_database()
+    if not connection:
+        raise HTTPException(status_code=500, detail="Failed to connect to database")
 
+    try:
+        with connection.cursor() as cursor:
+            sql = "CALL spGetEmployeeCount(%s);"
+            cursor.execute(sql, (id,))
+            result = cursor.fetchone()
+            if result:
+                return result
+            else:
+                raise HTTPException(status_code=404, detail=f"Count for {id} company not found")
+    except pymysql.MySQLError as err:
+        print(f"Error fetching employee count: {err}")
+        raise HTTPException(status_code=500, detail="Get employee count by status failed (DB Error)")
+    finally:
+        if connection:
+            connection.close() 
+
+#count of tickets
+@app.get("/ticket_count")
+async def get_ticket_count():
+    connection = connect_to_database()
+    if not connection:
+        raise HTTPException(status_code=500, detail="Failed to connect to database")
+
+    try:
+        with connection.cursor() as cursor:
+            sql = "CALL spGetTicketCount();"
+            cursor.execute(sql, ())
+            result = cursor.fetchall()
+            if result:
+                return result
+            else:
+                raise HTTPException(status_code=404, detail=f"Count for ticket not found")
+    except pymysql.MySQLError as err:
+        print(f"Error fetching ticket count: {err}")
+        raise HTTPException(status_code=500, detail="Get ticket count by status failed (DB Error)")
+    finally:
+        if connection:
+            connection.close()
+
+#count of tickets
+@app.get("/ticket_counts/{id}")
+async def get_ticket_count_based_id(id:str):
+    connection = connect_to_database()
+    if not connection:
+        raise HTTPException(status_code=500, detail="Failed to connect to database")
+
+    try:
+        with connection.cursor() as cursor:
+            sql = "CALL spGetTicketCountBasedCID(%s);"
+            cursor.execute(sql, (id,))
+            result = cursor.fetchone()
+            if result:
+                return result
+            else:
+                raise HTTPException(status_code=404, detail=f"Count for {id} ticket not found")
+    except pymysql.MySQLError as err:
+        print(f"Error fetching ticket count: {err}")
+        raise HTTPException(status_code=500, detail="Get ticket count by status failed (DB Error)")
+    finally:
+        if connection:
+
+            connection.close()
 handler=mangum.Mangum(app)
