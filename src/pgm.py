@@ -1443,6 +1443,7 @@ class TicketUpdateRequest(BaseModel):
     ticket_id: int
     employee_id: str
     rejected_reason: Optional[str] = None
+    rejected_date: Optional[date] = None
 
 # Endpoint to update ticket and employee status via path parameters
 @app.put("/approve_ticket/{company_id}/{ticket_id}/{employee_id}")
@@ -1483,8 +1484,8 @@ async def set_employee_rejected_ticket(ticketUpdateRequest: TicketUpdateRequest 
     connection = connect_to_database()
     try:
         with connection.cursor() as cursor:
-            sql = "CALL spEmployeeRejectedTicket(%s, %s, %s, %s);"
-            cursor.execute(sql, (ticketUpdateRequest.company_id, ticketUpdateRequest.ticket_id, ticketUpdateRequest.employee_id, ticketUpdateRequest.rejected_reason))
+            sql = "CALL spEmployeeRejectedTicket(%s, %s, %s, %s, %s);"
+            cursor.execute(sql, (ticketUpdateRequest.company_id, ticketUpdateRequest.ticket_id, ticketUpdateRequest.employee_id, ticketUpdateRequest.rejected_reason, ticketUpdateRequest.rejected_date))
             connection.commit() 
 
         return {"message": "Employee Rejected work and api updated successfully"}
@@ -1493,6 +1494,34 @@ async def set_employee_rejected_ticket(ticketUpdateRequest: TicketUpdateRequest 
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
     finally:
         connection.close()
+
+class ReAssignTicket(BaseModel):
+    company_id: str
+    old_employee_id: str
+    new_employee_id: str
+    ticket_id: int
+
+# for reassign employee
+@app.put("/reassign_ticket")
+async def reassign_ticket(ticket_info: ReAssignTicket = Body(...)):
+    connection = connect_to_database()
+    if not connection:
+        return {"error": "Failed to connect to database"}
+     
+    try:
+        with connection.cursor() as cursor:
+            token = shortuuid.uuid()
+            sql = "CALL spReAssignTicket(%s, %s, %s, %s, %s);"
+            cursor.execute(sql, (ticket_info.company_id, ticket_info.old_employee_id, ticket_info.new_employee_id, ticket_info.ticket_id, token))
+            connection.commit()
+
+            return {"message": "Employee work ReAssigned successful"}
+    except pymysql.MySQLError as err:
+        print(f"Error calling stored procedure: {err}")
+        raise HTTPException(status_code=500, detail="Employee reassignment failed")
+    finally:
+        if connection:
+            connection.close()
 
 class AdminTicketInfo(BaseModel):
     rejected_reason: Optional[str] = None
@@ -1518,6 +1547,161 @@ async def update_ticket(ticket_id: int, ticket_info: AdminTicketInfo = Body(...)
     except pymysql.MySQLError as err:
         print(f"Error updating Ticket: {err}")
         raise HTTPException(status_code=500, detail=f"Failed to update ticket with ID {ticket_id}")
+    finally:
+        if connection:
+            connection.close()
+
+@app.put("/employee_accept_ticket/{ticket_tocken}")
+async def update_ticket(ticket_tocken: str):
+    connection = connect_to_database()
+    if not connection:
+        raise HTTPException(status_code=500, detail="Failed to connect to the database")
+
+    try:
+        with connection.cursor() as cursor:
+
+            sql = """
+                CALL spEmployeeAcceptTicket(%s);
+            """
+            cursor.execute(sql, ticket_tocken)
+            connection.commit()
+
+            return {"message": f"Ticket with ID {ticket_tocken} Acceppted successfully"}
+    except pymysql.MySQLError as err:
+        print(f"Error updating Ticket: {err}")
+        raise HTTPException(status_code=500, detail=f"Failed to update ticket with ID {ticket_tocken}")
+    finally:
+        if connection:
+            connection.close()
+
+@app.get("/employees/pending_tickets/{company_id}/{emp_id}")
+async def get_employee_unassigned_tickets(company_id: str, emp_id: str):
+    connection = connect_to_database()
+    if not connection:
+        raise HTTPException(status_code=500, detail="Failed to connect to the database")
+
+    try:
+        with connection.cursor() as cursor:
+            sql = "CALL spGetAllEmployeePendingTickets(%s, %s);"
+            cursor.execute(sql, (company_id, emp_id))
+            result = cursor.fetchall()
+            if result:
+                return result
+            else:
+                return []
+    except pymysql.MySQLError as err:
+        print(f"Error fetching unassigned tickets: {err}")
+        raise HTTPException(status_code=500, detail="Failed to fetch unassigned tickets (DB Error)")
+    finally:
+        if connection:
+            connection.close()
+
+@app.get("/employees/inprogress_tickets/{company_id}/{emp_id}")
+async def get_employee_inprogress_tickets(company_id: str, emp_id: str):
+    connection = connect_to_database()
+    if not connection:
+        raise HTTPException(status_code=500, detail="Failed to connect to the database")
+
+    try:
+        with connection.cursor() as cursor:
+            sql = "CALL spGetAllEmployeesInProgressTickets(%s, %s);"
+            cursor.execute(sql, (company_id, emp_id))
+            result = cursor.fetchall()
+            if result:
+                return result
+            else:
+                return []
+    except pymysql.MySQLError as err:
+        print(f"Error fetching in-progress tickets: {err}")
+        raise HTTPException(status_code=500, detail="Failed to fetch in-progress tickets (DB Error)")
+    finally:
+        if connection:
+            connection.close()
+
+@app.get("/employees/completed_tickets/{company_id}/{emp_id}")
+async def get_employee_completed_tickets(company_id: str, emp_id: str):
+    connection = connect_to_database()
+    if not connection:
+        raise HTTPException(status_code=500, detail="Failed to connect to the database")
+
+    try:
+        with connection.cursor() as cursor:
+            sql = "CALL spGetAllEmployeeCompletedTickets(%s, %s);"
+            cursor.execute(sql, (company_id, emp_id))
+            result = cursor.fetchall()
+            if result:
+                return result
+            else:
+                return []
+    except pymysql.MySQLError as err:
+        print(f"Error fetching completed tickets: {err}")
+        raise HTTPException(status_code=500, detail="Failed to fetch completed tickets (DB Error)")
+    finally:
+        if connection:
+            connection.close()
+
+# Define the Ticket Status model
+class TicketUpdateStatus(BaseModel):
+    work_started_time: Optional[datetime] = None
+    work_ended_time: Optional[datetime] = None
+    photos: Optional[str] = None
+
+@app.put("/ticket_status/save/{ticket_token}")
+async def update_ticket_status(ticket_token: str, ticket_status: TicketUpdateStatus = Body(...)):
+    connection = connect_to_database()
+    if not connection:
+        raise HTTPException(status_code=500, detail="Failed to connect to database")
+
+    try:
+        with connection.cursor() as cursor:
+            sql = "CALL spSaveTicketStatus(%s, %s, %s, %s);"
+            cursor.execute(sql, (
+                ticket_token,
+                ticket_status.work_started_time,
+                ticket_status.work_ended_time,
+                ticket_status.photos
+            ))
+            connection.commit()
+
+            return {"message": f"Ticket status with ID {ticket_token} updated successfully"}
+    except pymysql.MySQLError as err:
+        print(f"Error updating ticket status: {err}")
+        raise HTTPException(status_code=500, detail="Update ticket status failed (DB Error)")
+    finally:
+        if connection:
+            connection.close()
+
+class TicketCompleteStatus(BaseModel):
+    company_id: str
+    employee_id: str
+    ticket_id: int
+    work_started_time: Optional[datetime] = None
+    work_ended_time: Optional[datetime] = None
+    photos: Optional[str] = None
+
+@app.put("/employee_complted_ticket")
+async def update_ticket_status(ticket_status: TicketCompleteStatus = Body(...)):
+    connection = connect_to_database()
+    if not connection:
+        raise HTTPException(status_code=500, detail="Failed to connect to database")
+
+    try:
+        with connection.cursor() as cursor:
+            sql = "CALL spEmployeeCompletedTicket(%s, %s, %s, %s, %s, %s);"
+            cursor.execute(sql, (
+                ticket_status.company_id,
+                ticket_status.employee_id,
+                ticket_status.ticket_id,
+                ticket_status.work_started_time,
+                ticket_status.work_ended_time,
+                ticket_status.photos
+            ))
+            connection.commit()
+
+            return {"message": f"Ticket status as Completed status with employee ID {ticket_status.employee_id} updated successfully"}
+    except pymysql.MySQLError as err:
+        print(f"Error updating ticket status: {err}")
+        raise HTTPException(status_code=500, detail="Update ticket status as completed state as failed (DB Error)")
     finally:
         if connection:
             connection.close()
