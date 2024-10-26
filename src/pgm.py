@@ -1395,4 +1395,131 @@ async def get_ticket_count_based_id(id:str):
         if connection:
 
             connection.close()
+
+#count of tickets
+@app.get("/invite_companies")
+async def get_invite_companies():
+    connection = connect_to_database()
+    if not connection:
+        raise HTTPException(status_code=500, detail="Failed to connect to database")
+
+    try:
+        with connection.cursor() as cursor:
+            sql = "CALL spGetCompanyInviteDetails();"
+            cursor.execute(sql)
+            result = cursor.fetchone()
+            if result:
+                return result
+            else:
+                return []
+    except pymysql.MySQLError:
+        raise HTTPException(status_code=500, detail="(DB Error)")
+    finally:
+        if connection:
+            connection.close()
+
+# Get All Employees
+@app.get("/employee_based_pending_works_count/{cid}")
+async def get_employee_based_pending_works_count(cid: str):
+    connection = connect_to_database()
+    if not connection:
+        raise HTTPException(status_code=500, detail="Failed to connect to database")
+
+    try:
+        with connection.cursor() as cursor:
+            sql = "CALL spGetEmployeesBasedCompany(%s);"
+            cursor.execute(sql, cid)
+            result = cursor.fetchall()
+            return result
+    except pymysql.MySQLError as err:
+        print(f"Error fetching employee info: {err}")
+        raise HTTPException(status_code=500, detail={"error": "Employee fetch all call failed (DB Error)"})
+    finally:
+        if connection:
+            connection.close()
+
+class TicketUpdateRequest(BaseModel):
+    company_id: str
+    ticket_id: int
+    employee_id: str
+    rejected_reason: Optional[str] = None
+
+# Endpoint to update ticket and employee status via path parameters
+@app.put("/approve_ticket/{company_id}/{ticket_id}/{employee_id}")
+async def update_status(company_id: str, ticket_id: int, employee_id: str):
+    connection = connect_to_database()
+    try:
+        with connection.cursor() as cursor:
+            sql = "CALL spForAssignTicket(%s, %s, %s);"
+            cursor.execute(sql, (company_id, ticket_id, employee_id))
+            connection.commit() 
+
+            ticket_token = shortuuid.uuid()
+
+            ts_sql = "CALL spCreateTicketStatus(%s, %s, %s, %s, %s, %s, %s, %s, %s);"
+            cursor.execute(ts_sql, (
+                ticket_token,
+                company_id,
+                employee_id,
+                ticket_id,
+                None,
+                None,
+                None,
+                "pending",
+                None
+            ))
+            connection.commit()
+
+        return {"message": "Assigned Employee updated successfully"}
+    except Exception as e:
+        connection.rollback() 
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+    finally:
+        connection.close()
+
+# Endpoint to update ticket and employee status via path parameters
+@app.put("/employee_rejected_ticket")
+async def set_employee_rejected_ticket(ticketUpdateRequest: TicketUpdateRequest = Body(...)):
+    connection = connect_to_database()
+    try:
+        with connection.cursor() as cursor:
+            sql = "CALL spEmployeeRejectedTicket(%s, %s, %s, %s);"
+            cursor.execute(sql, (ticketUpdateRequest.company_id, ticketUpdateRequest.ticket_id, ticketUpdateRequest.employee_id, ticketUpdateRequest.rejected_reason))
+            connection.commit() 
+
+        return {"message": "Employee Rejected work and api updated successfully"}
+    except Exception as e:
+        connection.rollback() 
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+    finally:
+        connection.close()
+
+class AdminTicketInfo(BaseModel):
+    rejected_reason: Optional[str] = None
+    rejected_date: Optional[date] = None
+
+# Update Ticket by ticket_id
+@app.put("/admin_reject_ticket/{ticket_id}")
+async def update_ticket(ticket_id: int, ticket_info: AdminTicketInfo = Body(...)):
+    connection = connect_to_database()
+    if not connection:
+        raise HTTPException(status_code=500, detail="Failed to connect to the database")
+
+    try:
+        with connection.cursor() as cursor:
+
+            sql = """
+                CALL spAdminRejectedTicket(%s, %s, %s);
+            """
+            cursor.execute(sql, (ticket_id, ticket_info.rejected_reason, ticket_info.rejected_date))
+            connection.commit()
+
+            return {"message": f"Ticket with ID {ticket_id} Deleted successfully"}
+    except pymysql.MySQLError as err:
+        print(f"Error updating Ticket: {err}")
+        raise HTTPException(status_code=500, detail=f"Failed to update ticket with ID {ticket_id}")
+    finally:
+        if connection:
+            connection.close()
+
 handler=mangum.Mangum(app)
