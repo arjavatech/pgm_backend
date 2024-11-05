@@ -167,6 +167,7 @@ class InviteInfo(BaseModel):
     email: str
     url: Optional[str] = None
     time_stamp: Optional[str] = None
+    isCompany: Optional[bool] = None
     status: Optional[str] = None
 
 # --------- Invite Info Endpoints ---------
@@ -179,8 +180,8 @@ async def create_invite_info(invite_info: InviteInfo = Body(...)):
 
     try:
         with connection.cursor() as cursor:
-            sql = "CALL spCreateInviteInfo(%s, %s, %s, %s);"
-            cursor.execute(sql, (invite_info.email, invite_info.url, invite_info.time_stamp, invite_info.status))
+            sql = "CALL spCreateInviteInfo(%s, %s, %s, %s, %s);"
+            cursor.execute(sql, (invite_info.email, invite_info.url, invite_info.time_stamp, invite_info.isCompany, invite_info.status))
             connection.commit()
 
             return {"message": "InviteInfo created successfully"}
@@ -449,8 +450,33 @@ class SignUp(BaseModel):
     signup_url: Optional[str] = None
     is_employee: Optional[bool] = None
 
+
+# Get Sign Up by ID API
+@app.get("/sign_up/get/{id}")
+async def get_sign_up_by_id(id: str):
+    connection = connect_to_database()
+    if not connection:
+        raise HTTPException(status_code=500, detail="Failed to connect to database")
+
+    try:
+        with connection.cursor() as cursor:
+            sql = "CALL spGetSignUpById(%s);"
+            cursor.execute(sql, (id,))
+            result = cursor.fetchone()
+
+            if result:
+                return result
+            else:
+                raise HTTPException(status_code=404, detail=f"SignUp with ID {id} not found")
+    except pymysql.MySQLError as err:
+        print(f"Error fetching SignUp: {err}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve SignUp")
+    finally:
+        if connection:
+            connection.close()
+
 # Create Sign Up API
-@app.post("/sign_up/create")
+@app.post("/signup/create")
 async def create_sign_up(sign_up: SignUp = Body(...)):
     connection = connect_to_database()
     if not connection:
@@ -483,23 +509,24 @@ async def create_sign_up(sign_up: SignUp = Body(...)):
         if connection:
             connection.close()
 
-# Get Sign Up by ID API
-@app.get("/sign_up/get/{id}")
-async def get_sign_up_by_id(id: str):
+@app.put("/employee_get_based_invite_url")
+async def get_sign_up_by_id(request: dict= Body(...)):
     connection = connect_to_database()
     if not connection:
         raise HTTPException(status_code=500, detail="Failed to connect to database")
 
     try:
         with connection.cursor() as cursor:
-            sql = "CALL spGetSignUpById(%s);"
-            cursor.execute(sql, (id,))
+            _id = request.get("signup_url")
+            
+            sql = "CALL spGetEmployeeBasedUrl(%s);"
+            cursor.execute(sql, (_id,))
             result = cursor.fetchone()
 
             if result:
                 return result
             else:
-                raise HTTPException(status_code=404, detail=f"SignUp with ID {id} not found")
+                raise HTTPException(status_code=404, detail=f"Employee with ID {_id} not found")
     except pymysql.MySQLError as err:
         print(f"Error fetching SignUp: {err}")
         raise HTTPException(status_code=500, detail="Failed to retrieve SignUp")
@@ -751,8 +778,8 @@ class Employee(BaseModel):
     areas_covered: Optional[str] = None
     assigned_locations: Optional[str] = None
     employee_status: Optional[str] = None
-    employee_no_of_completed_work: Optional[int] = 0
-    no_of_pending_works: Optional[int] = 0
+    employee_no_of_completed_work: Optional[int] = None
+    no_of_pending_works: Optional[int] = None
     street: Optional[str] = None
     city: Optional[str] = None
     zip: Optional[str] = None
@@ -775,29 +802,41 @@ async def create_employee(employee: Employee = Body(...)):
         with connection.cursor() as cursor:
 
             employee_id = shortuuid.uuid()
+            company_sql = "CALL spGetCompanyById(%s);"
+            cursor.execute(company_sql, (employee.company_id,))
+            result = cursor.fetchone()
+
+
+            url = f"https://arjavatech.github.io/pgm_scheduler/signUp.html?invite_id_e={employee.company_id}--{employee_id}"
+
+            invite_email_check = "CALL spGetInviteInfo(%s);"
+            cursor.execute(invite_email_check, (employee.email,))
+            invite_result = cursor.fetchone()
+
+            if invite_result:
+                return {"error": "User Email Already Registered with another company"}
+            else:
+                current_datetime = datetime.now()
+                invite_sql = "CALL spCreateInviteInfo(%s, %s, %s, %s, %s);"
+                cursor.execute(invite_sql, (employee.email, url, current_datetime , False, "Pending"))
+                connection.commit()
+
             sql = """
                 CALL spCreateEmployee(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
             """
             cursor.execute(sql, (
                 employee_id, employee.company_id, employee.first_name, employee.last_name,
-                employee.phone_number, employee.email, employee.invite_url, employee.specialization,
+                employee.phone_number, employee.email, url, employee.specialization,
                 employee.areas_covered, employee.assigned_locations, employee.employee_status,
-                employee.employee_no_of_completed_work, employee.no_of_pending_works, employee.street,
+                0, 0, employee.street,
                 employee.city, employee.zip, employee.skills, employee.qualification, employee.experience,
                 employee.available, employee.photo
             ))
             connection.commit()
 
-            company_sql = "CALL spGetCompanyById(%s);"
-            cursor.execute(company_sql, (employee.company_id,))
-            result = cursor.fetchone()
-
-            url = f"https://arjavatech.github.io/pgm_scheduler/signUp.html?invite_id_e={employee.company_id}"
-
             sender = 'pitchumaniece@gmail.com'
             app_password = 'oppv abhd hfwh kavm'
             subject = f"Welcome to {result["company_name"]} – Activate Your Account and Get Started!"
-
 
 
             html_content = f"""
@@ -887,8 +926,9 @@ async def update_employee(employee_id: str, employee: Employee = Body(...)):
     try:
         with connection.cursor() as cursor:
             sql = """
-                CALL spUpdateEmployee(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                CALL spUpdateEmployee(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
             """
+
             cursor.execute(sql, (
                 employee_id, employee.company_id, employee.first_name, employee.last_name,
                 employee.phone_number, employee.email, employee.invite_url, employee.specialization,
@@ -949,8 +989,8 @@ async def company_register_call(company_info: CompanyInfo = Body(...)):
             if invite_result:
                 return {"error": "User Email Already Registered with another company"}
             else:
-                invite_sql = "CALL spCreateInviteInfo(%s, %s, %s, %s);"
-                cursor.execute(invite_sql, (company_info.email, url, current_datetime , "Pending"))
+                invite_sql = "CALL spCreateInviteInfo(%s, %s, %s, %s, %s);"
+                cursor.execute(invite_sql, (company_info.email, url, current_datetime , True, "Pending"))
                 connection.commit()
 
             company_sql = "CALL spGetUser(%s)"
@@ -1003,8 +1043,6 @@ async def company_register_call(company_info: CompanyInfo = Body(...)):
                 """
                 # Initialize Yagmail with the sender's Gmail credentials
                 yag = yagmail.SMTP(user=sender, password=app_password)
-
-                
 
                 # Sending the email
                 yag.send(to=company_info.email, subject=subject, contents=html_content)
